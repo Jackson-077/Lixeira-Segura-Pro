@@ -120,13 +120,13 @@ Após destruir todos os arquivos, as pastas vazias serão removidas automaticame
 Clone o projeto:
 
 ```bash
-git clone https://github.com/Jackson-077/Lixeira_Segura.git
+git clone https://github.com/Jackson-077/Lixeira-Segura-Pro.git
 ```
 
 Entre na pasta:
 
 ```bash
-cd Lixeira_Segura
+cd Lixeira-Segura-Pro
 ```
 
 Dê permissão aos scripts:
