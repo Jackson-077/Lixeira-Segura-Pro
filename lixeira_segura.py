@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ==========================================================
 # Lixeira Segura Pro
-# Versão: 3.0 (Edição Jackson Q.)
+# Versão: 1.0 
 #
 # Autor: Jackson Q.
 # Descrição: Utilitário profissional para destruição de dados.
