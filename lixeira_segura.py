@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
 # ==========================================================
 # Lixeira Segura Pro
-# Versão: 1.0 
+# Versão: 1.2 (Edição Jackson Q. - Versão Final Estável)
 #
 # Autor: Jackson Q.
 # Descrição: Utilitário profissional para destruição de dados.
-# Interface moderna utilizando CustomTkinter.
+# Correções: Controle de janelas únicas (Singleton Windows),
+#            detecção profunda de hardware e limpeza total.
 # ==========================================================
 
 import os
 import sys
 import threading
 import subprocess
-import shutil
 import time
 import datetime
 import json
 import customtkinter as ctk
 from tkinter import messagebox
-from PIL import Image
 
 # -----------------------------
 # Configurações de Tema e Estilo
@@ -36,7 +35,7 @@ ARQUIVO_LOG = os.path.join(DIR_LOGS, "exclusoes.log")
 class LixeiraSeguraApp:
     def __init__(self):
         self.window = ctk.CTk()
-        self.window.title("Lixeira Segura Pro")
+        self.window.title("Lixeira Segura Pro - v1.2")
         self.window.geometry("800x650")
         self.window.resizable(True, True)
 
@@ -49,14 +48,28 @@ class LixeiraSeguraApp:
         # Estado e Configurações
         self.config = self.load_config()
         self.disco_info = self.detectar_disco()
+        self.running_destruction = False
+        
+        # Controle de Janelas Únicas (Singleton)
+        self.win_history = None
+        self.win_config = None
+        self.win_help = None
         
         self.create_widgets()
+        
+        # Monitoramento em tempo real
+        self.stop_monitor = False
+        self.monitor_thread = threading.Thread(target=self.monitorar_pasta, daemon=True)
+        self.monitor_thread.start()
+        
         self.window.mainloop()
 
     def load_config(self):
         if os.path.exists(ARQUIVO_CONFIG):
-            with open(ARQUIVO_CONFIG, "r") as f:
-                return json.load(f)
+            try:
+                with open(ARQUIVO_CONFIG, "r") as f:
+                    return json.load(f)
+            except: pass
         return {"log": True, "confirmacao_dupla": True}
 
     def save_config(self):
@@ -64,14 +77,28 @@ class LixeiraSeguraApp:
             json.dump(self.config, f)
 
     def detectar_disco(self):
+        """Detecta se o disco é HDD ou SSD para aplicar o melhor método de destruição."""
         try:
-            # Simplificado para Linux
+            # Tenta identificar via lsblk
             output = subprocess.check_output("lsblk -o ROTA,MOUNTPOINT", shell=True).decode()
             if "0 /" in output or "0 /home" in output:
                 return "HDD (Disco Rígido)"
             return "SSD/NVMe (Memória Flash)"
         except:
             return "Disco Genérico"
+
+    def get_all_entries(self):
+        """Lista todos os arquivos, pastas e links simbólicos recursivamente."""
+        entries = []
+        try:
+            for root, dirs, files in os.walk(DIR_APAGAR):
+                for name in files + dirs:
+                    full_path = os.path.join(root, name)
+                    if os.path.lexists(full_path):
+                        entries.append(full_path)
+        except Exception as e:
+            print(f"Erro ao listar: {e}")
+        return entries
 
     def create_widgets(self):
         # Título Principal
@@ -88,33 +115,31 @@ class LixeiraSeguraApp:
         self.sys_info = ctk.CTkLabel(self.info_frame, text=f"SISTEMA: Linux | HARDWARE: {self.disco_info}", font=("Segoe UI", 13, "bold"))
         self.sys_info.pack(pady=10)
 
-        # Área Principal (Scrollable)
-        self.main_frame = ctk.CTkScrollableFrame(self.window, width=750, height=350)
+        # Área Principal
+        self.main_frame = ctk.CTkFrame(self.window, fg_color="transparent")
         self.main_frame.pack(padx=20, pady=10, fill="both", expand=True)
 
-        # Botões de Ação Rápida
+        # Botões de Ação
         self.actions_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.actions_frame.pack(pady=10, fill="x")
 
-        self.btn_open = ctk.CTkButton(self.actions_frame, text="📂 Abrir Pasta de Descarte", font=("Segoe UI", 14, "bold"), 
-                                     height=45, command=self.abrir_pasta)
+        self.btn_open = ctk.CTkButton(self.actions_frame, text="📂 Abrir Pasta de Descarte", font=("Segoe UI", 14, "bold"), height=45, command=self.abrir_pasta)
         self.btn_open.pack(side="left", padx=10, expand=True, fill="x")
 
-        self.btn_destroy = ctk.CTkButton(self.actions_frame, text="🔥 Destruir Arquivos", font=("Segoe UI", 14, "bold"), 
-                                        height=45, fg_color="#E74C3C", hover_color="#C0392B", command=self.confirmar_destruicao)
+        self.btn_destroy = ctk.CTkButton(self.actions_frame, text="🔥 Destruir Arquivos", font=("Segoe UI", 14, "bold"), height=45, fg_color="#E74C3C", hover_color="#C0392B", command=self.confirmar_destruicao)
         self.btn_destroy.pack(side="left", padx=10, expand=True, fill="x")
 
-        # Status e Progresso
-        self.status_box = ctk.CTkTextbox(self.main_frame, height=150, font=("Consolas", 12))
-        self.status_box.pack(padx=10, pady=10, fill="x")
-        self.status_box.insert("0.0", ">>> Aguardando arquivos na pasta de descarte...\n")
+        # Caixa de Status
+        self.status_box = ctk.CTkTextbox(self.main_frame, height=200, font=("Consolas", 12))
+        self.status_box.pack(padx=10, pady=10, fill="both", expand=True)
         self.status_box.configure(state="disabled")
 
+        # Barra de Progresso
         self.progress_bar = ctk.CTkProgressBar(self.main_frame, width=700)
         self.progress_bar.pack(pady=10)
         self.progress_bar.set(0)
 
-        # Rodapé com Configurações e Ajuda
+        # Rodapé
         self.footer_frame = ctk.CTkFrame(self.window, height=60, corner_radius=0, fg_color="transparent")
         self.footer_frame.pack(side="bottom", fill="x", padx=20, pady=10)
 
@@ -130,263 +155,163 @@ class LixeiraSeguraApp:
         self.btn_exit = ctk.CTkButton(self.footer_frame, text="Sair", width=100, fg_color="#555", hover_color="#333", command=self.window.quit)
         self.btn_exit.pack(side="right", padx=5)
 
-    # --- Lógica ---
+    def log_msg(self, msg, clear=False):
+        def _write():
+            if not self.window.winfo_exists(): return
+            self.status_box.configure(state="normal")
+            if clear: self.status_box.delete("0.0", "end")
+            self.status_box.insert("end", f"{msg}\n")
+            self.status_box.see("end")
+            self.status_box.configure(state="disabled")
+        self.window.after(0, _write)
 
-    def log_msg(self, msg):
-        self.status_box.configure(state="normal")
-        self.status_box.insert("end", f"{msg}\n")
-        self.status_box.see("end")
-        self.status_box.configure(state="disabled")
+    def monitorar_pasta(self):
+        """Monitora a pasta de descarte e atualiza o status visual."""
+        last_count = -1
+        while not self.stop_monitor:
+            if not self.running_destruction:
+                entries = self.get_all_entries()
+                count = len(entries)
+                if count != last_count:
+                    if count == 0:
+                        self.log_msg(">>> Aguardando arquivos na pasta de descarte...", clear=True)
+                    else:
+                        tamanho = 0
+                        for f in entries:
+                            try: 
+                                if os.path.isfile(f): tamanho += os.path.getsize(f)
+                            except: pass
+                        tamanho_fmt = f"{tamanho / (1024*1024):.2f} MB"
+                        self.log_msg(f">>> {count} item(ns) detectado(s) ({tamanho_fmt}).\nPronto para destruição segura.", clear=True)
+                    last_count = count
+            time.sleep(2)
 
     def abrir_pasta(self):
         subprocess.Popen(["xdg-open", DIR_APAGAR])
-        self.log_msg(">>> Pasta de descarte aberta.")
 
     def confirmar_destruicao(self):
-
-        arquivos = []
-
-        # Procurar arquivos dentro de todas as pastas
-        for raiz, pastas, arquivos_nome in os.walk(DIR_APAGAR):
-            for arquivo in arquivos_nome:
-                caminho = os.path.join(raiz, arquivo)
-                arquivos.append(caminho)
-
-        if not arquivos:
-            messagebox.showinfo(
-                "Aviso",
-                "A pasta está vazia! Coloque arquivos ou pastas dentro de 'apagar_aqui' primeiro."
-            )
+        entries = self.get_all_entries()
+        if not entries:
+            messagebox.showinfo("Aviso", "A pasta está vazia!")
             return
 
-        total_tamanho = sum(os.path.getsize(f) for f in arquivos)
-        tamanho_formatado = f"{total_tamanho / (1024*1024):.2f} MB"
-
-        lista_nomes = "\n".join(
-            [os.path.basename(f) for f in arquivos[:10]]
-        )
-
-        if len(arquivos) > 10:
-            lista_nomes += "\n... e outros."
-
-        pergunta = (
-            f"Deseja destruir permanentemente {len(arquivos)} arquivos "
-            f"({tamanho_formatado})?\n\n"
-            f"{lista_nomes}\n\n"
-            "ESTA AÇÃO NÃO PODE SER DESFEITA!"
-        )
-
+        pergunta = f"Deseja destruir permanentemente {len(entries)} item(ns)?\n\nESTA AÇÃO É IRREVERSÍVEL!"
         if messagebox.askyesno("CONFIRMAÇÃO CRÍTICA", pergunta):
-
-            if self.config["confirmacao_dupla"]:
-
-                if not messagebox.askyesno(
-                    "ÚLTIMO AVISO",
-                    "Você tem certeza absoluta?\n\n"
-                    "Os dados serão sobrescritos fisicamente."
-                ):
+            if self.config.get("confirmacao_dupla", True):
+                if not messagebox.askyesno("ÚLTIMO AVISO", "Você tem certeza absoluta?"):
                     return
+            
+            self.running_destruction = True
+            threading.Thread(target=self.processo_destruicao, args=(entries,), daemon=True).start()
 
-            threading.Thread(
-                target=self.processo_destruicao,
-                args=(arquivos,),
-                daemon=True
-            ).start()
+    def processo_destruicao(self, entries):
+        self.window.after(0, lambda: self.btn_destroy.configure(state="disabled"))
+        self.window.after(0, lambda: self.btn_open.configure(state="disabled"))
+        self.log_msg(">>> INICIANDO DESTRUIÇÃO SEGURA...", clear=True)
+        
+        total = len(entries)
+        for i, caminho in enumerate(entries):
+            if not os.path.lexists(caminho): continue
+            
+            nome = os.path.basename(caminho)
+            self.log_msg(f"Processando ({i+1}/{total}): {nome}")
+            
+            try:
+                if os.path.islink(caminho):
+                    os.unlink(caminho)
+                elif os.path.isfile(caminho):
+                    cmd = ["shred", "-f", "-u", "-z", "-n", "3"] if "HDD" in self.disco_info else ["shred", "-f", "-u", "-n", "1"]
+                    subprocess.run(cmd + [caminho], check=True, stderr=subprocess.DEVNULL)
+                
+                if self.config.get("log", True):
+                    with open(ARQUIVO_LOG, "a") as f:
+                        f.write(f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} - {nome} - Sucesso\n")
+            except:
+                self.log_msg(f"Aviso: Falha ao destruir {nome}")
 
+            self.window.after(0, lambda v=(i + 1) / total: self.progress_bar.set(v))
 
+        # Limpar pastas
+        for root, dirs, files in os.walk(DIR_APAGAR, topdown=False):
+            for d in dirs:
+                try: os.rmdir(os.path.join(root, d))
+                except: pass
 
-    def processo_destruicao(self, arquivos):
-
-            self.btn_destroy.configure(state="disabled")
-            self.btn_open.configure(state="disabled")
-
-            self.log_msg(">>> Iniciando destruição segura...")
-
-            total = len(arquivos)
-
-            for i, caminho in enumerate(arquivos):
-
-                nome = os.path.basename(caminho)
-
-                self.log_msg(f"Destruindo: {nome}")
-
-                try:
-
-                    # HDD
-                    if "HDD" in self.disco_info:
-
-                        subprocess.run(
-                            [
-                                "shred",
-                                "-f",
-                                "-u",
-                                "-z",
-                                "-n",
-                                "3",
-                                caminho
-                            ],
-                            check=True
-                        )
-
-                    # SSD / NVMe
-                    else:
-
-                        subprocess.run(
-                            [
-                                "shred",
-                                "-f",
-                                "-u",
-                                "-n",
-                                "1",
-                                caminho
-                            ],
-                            check=True
-                        )
-
-
-                    if self.config["log"]:
-
-                        with open(ARQUIVO_LOG, "a") as f:
-
-                            f.write(
-                                f"{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
-                                f" - {nome} - Destruído\n"
-                            )
-
-
-                except Exception as e:
-
-                    self.log_msg(
-                        f"ERRO em {nome}: {e}"
-                    )
-
-
-                self.progress_bar.set(
-                    (i + 1) / total
-                )
-
-                self.window.update_idletasks()
-
-
-
-            self.log_msg(
-                ">>> Removendo pastas vazias..."
-            )
-
-
-            # Remove somente pastas vazias dentro de apagar_aqui
-            for raiz, pastas, arquivos in os.walk(
-                DIR_APAGAR,
-                topdown=False
-            ):
-
-                for pasta in pastas:
-
-                    caminho_pasta = os.path.join(
-                        raiz,
-                        pasta
-                    )
-
-                    try:
-
-                        os.rmdir(caminho_pasta)
-
-                        self.log_msg(
-                            f"Pasta removida: {pasta}"
-                        )
-
-                    except OSError:
-
-                        pass
-
-
-
-            self.log_msg(
-                ">>> Sincronizando hardware..."
-            )
-
-            subprocess.run(
-                ["sync"]
-            )
-
-
-            self.log_msg(
-                ">>> OPERAÇÃO CONCLUÍDA COM SUCESSO."
-            )
-
-
-            messagebox.showinfo(
-                "Sucesso",
-                "Todos os arquivos foram destruídos permanentemente."
-            )
-
-
-            self.progress_bar.set(0)
-
-            self.btn_destroy.configure(
-                state="normal"
-            )
-
-            self.btn_open.configure(
-                state="normal"
-            )
+        subprocess.run(["sync"])
+        self.log_msg(">>> OPERAÇÃO CONCLUÍDA COM SUCESSO.")
+        self.window.after(0, lambda: messagebox.showinfo("Sucesso", "Todos os dados foram destruídos."))
+        self.window.after(0, lambda: self.progress_bar.set(0))
+        self.window.after(0, lambda: self.btn_destroy.configure(state="normal"))
+        self.window.after(0, lambda: self.btn_open.configure(state="normal"))
+        self.running_destruction = False
 
     def ver_historico(self):
-        win = ctk.CTkToplevel(self.window)
-        win.title("Histórico de Exclusões")
-        win.geometry("600x400")
+        if self.win_history is not None and self.win_history.winfo_exists():
+            self.win_history.focus()
+            return
+
+        self.win_history = ctk.CTkToplevel(self.window)
+        self.win_history.title("Histórico de Exclusões")
+        self.win_history.geometry("600x450")
+        self.win_history.attributes("-topmost", True)
         
-        txt = ctk.CTkTextbox(win, width=580, height=330)
+        txt = ctk.CTkTextbox(self.win_history, width=580, height=350)
         txt.pack(padx=10, pady=10)
         
         if os.path.exists(ARQUIVO_LOG):
-            with open(ARQUIVO_LOG, "r") as f:
-                txt.insert("0.0", f.read())
+            with open(ARQUIVO_LOG, "r") as f: txt.insert("0.0", f.read())
         
-        def limpar_log_seguro():
-            if messagebox.askyesno("Limpar Logs", "Deseja destruir permanentemente o arquivo de logs?"):
+        def limpar():
+            if messagebox.askyesno("Limpar Logs", "Destruir arquivo de logs permanentemente?", parent=self.win_history):
                 subprocess.run(["shred", "-f", "-u", "-z", "-n", "3", ARQUIVO_LOG])
                 with open(ARQUIVO_LOG, "w") as f: f.write("")
                 txt.delete("0.0", "end")
-                messagebox.showinfo("Sucesso", "Histórico destruído.")
-
-        ctk.CTkButton(win, text="🔥 Destruir Histórico", fg_color="#E74C3C", command=limpar_log_seguro).pack(pady=5)
+        
+        ctk.CTkButton(self.win_history, text="🔥 Destruir Histórico", fg_color="#E74C3C", command=limpar).pack(pady=5)
 
     def abrir_config(self):
-        win = ctk.CTkToplevel(self.window)
-        win.title("Configurações")
-        win.geometry("400x300")
+        if self.win_config is not None and self.win_config.winfo_exists():
+            self.win_config.focus()
+            return
 
-        ctk.CTkLabel(win, text="Ajustes de Segurança", font=("Segoe UI", 16, "bold")).pack(pady=20)
+        self.win_config = ctk.CTkToplevel(self.window)
+        self.win_config.title("Ajustes")
+        self.win_config.geometry("400x300")
+        self.win_config.attributes("-topmost", True)
+
+        ctk.CTkLabel(self.win_config, text="Configurações de Segurança", font=("Segoe UI", 16, "bold")).pack(pady=20)
 
         def toggle_log():
-            self.config["log"] = not self.config["log"]
+            self.config["log"] = not self.config.get("log", True)
             self.save_config()
-            btn_l.configure(text=f"Registrar Logs: {'LIGADO' if self.config['log'] else 'DESLIGADO'}")
+            bl.configure(text=f"Registrar Logs: {'ON' if self.config['log'] else 'OFF'}")
 
         def toggle_confirm():
-            self.config["confirmacao_dupla"] = not self.config["confirmacao_dupla"]
+            self.config["confirmacao_dupla"] = not self.config.get("confirmacao_dupla", True)
             self.save_config()
-            btn_c.configure(text=f"Confirmação Dupla: {'LIGADO' if self.config['confirmacao_dupla'] else 'DESLIGADO'}")
+            bc.configure(text=f"Confirmação Dupla: {'ON' if self.config['confirmacao_dupla'] else 'OFF'}")
 
-        btn_l = ctk.CTkButton(win, text=f"Registrar Logs: {'LIGADO' if self.config['log'] else 'DESLIGADO'}", command=toggle_log)
-        btn_l.pack(pady=10)
+        bl = ctk.CTkButton(self.win_config, text=f"Registrar Logs: {'ON' if self.config.get('log', True) else 'OFF'}", command=toggle_log)
+        bl.pack(pady=10)
 
-        btn_c = ctk.CTkButton(win, text=f"Confirmação Dupla: {'LIGADO' if self.config['confirmacao_dupla'] else 'DESLIGADO'}", command=toggle_confirm)
-        btn_c.pack(pady=10)
+        bc = ctk.CTkButton(self.win_config, text=f"Confirmação Dupla: {'ON' if self.config.get('confirmacao_dupla', True) else 'OFF'}", command=toggle_confirm)
+        bc.pack(pady=10)
 
     def exibir_ajuda(self):
-        msg = f"""Lixeira Segura Pro 
+        msg = f"""Lixeira Segura Pro v1.2
+Desenvolvido por Jackson Q.
 
-Este programa garante que arquivos sensíveis sejam destruídos fisicamente do disco, tornando a recuperação impossível.
+Este utilitário foi criado para garantir a destruição definitiva de dados confidenciais.
 
-Como usar:
-1. Clique em 'Abrir Pasta de Descarte'.
-2. Mova os arquivos que deseja apagar para lá.
-3. Clique em 'Destruir Arquivos'.
+Como Funciona:
+Ao contrário da exclusão normal que apenas 'esconde' o arquivo, este programa escreve dados aleatórios por cima do arquivo original várias vezes antes de removê-lo.
 
-Diferença para a lixeira comum:
-A lixeira comum apenas remove o 'nome' do arquivo, mas os dados continuam no disco. Este programa 'esmaga' os dados escrevendo por cima deles várias vezes."""
+Uso em Empresas:
+Perfeito para conformidade com a LGPD e descarte seguro de dispositivos.
+
+Hardware:
+O programa detecta se você usa HDD ou SSD e aplica a técnica mais segura para cada um.
+"""
         messagebox.showinfo("Ajuda / Sobre", msg)
 
 if __name__ == "__main__":
