@@ -1,4 +1,4 @@
-# 🗑️ Lixeira Segura Pro v1.0
+# 🗑️ Lixeira Segura Pro v1.2
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
