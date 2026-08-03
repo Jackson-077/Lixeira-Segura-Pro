@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # ==========================================================
-# Lixeira Segura Pro
-# Gerador DEB profissional usando PyInstaller
-#
+# Lixeira Segura Pro - Gerador DEB Profissional
+# Versão: 1.1 (Correção PEP 668 - VENV Edition)
 # Autor: Jackson Q.
 # ==========================================================
 
@@ -11,325 +10,94 @@ set -e
 
 APP_NAME="lixeira-segura"
 APP_TITLE="Lixeira Segura Pro"
-VERSION="1.0.0"
-
+VERSION="1.1.0"
 MAIN_SCRIPT="lixeira_segura.py"
 ICON="icon/icone.png"
-
-SPEC_FILE="${APP_NAME}.spec"
-
-BUILD_DIR="build"
-DIST_DIR="dist"
-DEB_DIR="deb_build"
-
-OUTPUT="${APP_NAME}_${VERSION}_amd64.deb"
-
-
-############################################
-# Funções
-############################################
-
-erro()
-{
-    echo "ERRO: $1"
-    exit 1
-}
-
-ok()
-{
-    echo "[OK] $1"
-}
-
-
-############################################
-# Verificações
-############################################
+VENV_BIN="./venv/bin"
 
 echo "======================================"
 echo " Lixeira Segura Pro - Gerador DEB"
 echo "======================================"
 
+# 1. Verificações Iniciais
+[ -d "venv" ] || { echo "❌ Erro: venv não encontrada. Rode ./setup_projeto.sh primeiro."; exit 1; }
+[ -f "$MAIN_SCRIPT" ] || { echo "❌ Erro: $MAIN_SCRIPT não encontrado."; exit 1; }
+[ -f "$ICON" ] || { echo "❌ Erro: $ICON não encontrado na pasta icon/."; exit 1; }
 
-command -v python3 >/dev/null || \
-erro "Python3 não encontrado"
+# 2. Limpeza
+echo "🧹 Limpando builds antigos..."
+rm -rf build dist deb_build *.spec *.deb
 
+# 3. Compilação com PyInstaller via VENV
+echo "🚀 Compilando executável profissional (via VENV)..."
+$VENV_BIN/python -m PyInstaller \
+    --noconfirm \
+    --onedir \
+    --windowed \
+    --name "$APP_NAME" \
+    --add-data "icon/icone.png:icon" \
+    --collect-all "customtkinter" \
+    --hidden-import "PIL.Image" \
+    --hidden-import "darkdetect" \
+    --hidden-import "packaging" \
+    "$MAIN_SCRIPT"
 
-command -v dpkg-deb >/dev/null || \
-erro "dpkg-deb não encontrado"
-
-
-[ -f "$MAIN_SCRIPT" ] || \
-erro "$MAIN_SCRIPT não encontrado"
-
-
-[ -f "$ICON" ] || \
-erro "$ICON não encontrado"
-
-
-############################################
-# Verificar PyInstaller
-############################################
-
-echo "Verificando PyInstaller..."
-
-if ! python3 -m PyInstaller --version >/dev/null 2>&1
-then
-
-    echo "PyInstaller não encontrado."
-
-    python3 -m pip install --user pyinstaller
-
-fi
-
-
-PYI_VERSION=$(python3 -m PyInstaller --version)
-
-echo "PyInstaller: $PYI_VERSION"
-
-
-############################################
-# Limpeza
-############################################
-
-echo "Limpando arquivos antigos..."
-
-rm -rf "$BUILD_DIR"
-rm -rf "$DIST_DIR"
-rm -rf "$DEB_DIR"
-rm -f "$SPEC_FILE"
-rm -f "$OUTPUT"
-
-
-############################################
-# Localizar CustomTkinter
-############################################
-
-echo "Verificando CustomTkinter..."
-
-python3 - <<EOF
-import customtkinter
-print("CustomTkinter OK:", customtkinter.__version__)
-EOF
-
-
-ok "Ambiente preparado"
-
-
-echo "Próxima etapa: criando SPEC..."
-############################################
-# Criar arquivo SPEC
-############################################
-
-echo "Criando arquivo SPEC..."
-
-CTK_PATH=$(python3 - <<EOF
-import customtkinter
-import os
-print(os.path.dirname(customtkinter.__file__))
-EOF
-)
-
-
-cat > "$SPEC_FILE" <<EOF
-# -*- mode: python ; coding: utf-8 -*-
-
-from PyInstaller.utils.hooks import collect_data_files
-
-
-datas = []
-
-datas += collect_data_files("customtkinter")
-
-datas += [
-    ("icon/icone.png", "icon")
-]
-
-
-hiddenimports = [
-    "customtkinter",
-    "PIL",
-    "PIL.Image",
-    "darkdetect",
-    "packaging"
-]
-
-
-a = Analysis(
-    ["$MAIN_SCRIPT"],
-    pathex=[],
-    binaries=[],
-    datas=datas,
-    hiddenimports=hiddenimports,
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-)
-
-
-pyz = PYZ(a.pure)
-
-
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=True,
-    name="$APP_NAME",
-    debug=False,
-    strip=False,
-    upx=True,
-    console=False
-)
-
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    name="$APP_NAME"
-)
-
-EOF
-
-
-ok "Arquivo SPEC criado."
-
-
-############################################
-# Compilar com PyInstaller
-############################################
-
-echo "Compilando executável..."
-
-
-python3 -m PyInstaller \
-    --clean \
-    "$SPEC_FILE"
-
-
-ok "Executável criado."
-############################################
-# Criar estrutura DEB
-############################################
-
-echo "Criando estrutura do pacote DEB..."
-
-
+# 4. Criar estrutura do pacote DEB
+echo "📦 Criando estrutura do pacote DEB..."
+DEB_DIR="deb_build"
 mkdir -p "$DEB_DIR/DEBIAN"
 mkdir -p "$DEB_DIR/opt/$APP_NAME"
 mkdir -p "$DEB_DIR/usr/bin"
 mkdir -p "$DEB_DIR/usr/share/applications"
 mkdir -p "$DEB_DIR/usr/share/pixmaps"
 
+# 5. Copiar arquivos compilados
+cp -r "dist/$APP_NAME/"* "$DEB_DIR/opt/$APP_NAME/"
+cp "$ICON" "$DEB_DIR/usr/share/pixmaps/$APP_NAME.png"
 
-############################################
-# Copiar executável
-############################################
-
-cp -r "dist/$APP_NAME/"* \
-"$DEB_DIR/opt/$APP_NAME/"
-
-
-chmod +x \
-"$DEB_DIR/opt/$APP_NAME/$APP_NAME"
-
-
-############################################
-# Copiar ícone
-############################################
-
-cp "$ICON" \
-"$DEB_DIR/usr/share/pixmaps/$APP_NAME.png"
-
-
-############################################
-# Arquivo CONTROL
-############################################
-
-cat > "$DEB_DIR/DEBIAN/control" <<EOF
+# 6. Criar arquivo CONTROL
+cat << EOF > "$DEB_DIR/DEBIAN/control"
 Package: $APP_NAME
 Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: Jackson Q.
-Depends: libxcb-cursor0, xdg-utils, libxcb-cursor0
+Depends: libxcb-cursor0, xdg-utils
 Description: Lixeira Segura Pro
- Aplicativo para destruição segura de arquivos.
- Desenvolvido por Jackson Q.
+ Aplicativo para destruicao segura de arquivos.
+ Desenvolvido por Jackson Q. com interface moderna.
 EOF
 
-
-############################################
-# Criar comando do sistema
-############################################
-
-cat > "$DEB_DIR/usr/bin/$APP_NAME" <<EOF
+# 7. Criar comando de atalho no sistema
+cat << EOF > "$DEB_DIR/usr/bin/$APP_NAME"
 #!/bin/bash
-
-cd /opt/$APP_NAME
-
-exec ./lixeira-segura "\$@"
-
+exec /opt/$APP_NAME/$APP_NAME "\$@"
 EOF
-
-
 chmod 755 "$DEB_DIR/usr/bin/$APP_NAME"
 
-############################################
-# Criar atalho do menu
-############################################
-
-cat > "$DEB_DIR/usr/share/applications/$APP_NAME.desktop" <<EOF
+# 8. Criar atalho no Menu de Aplicativos
+cat << EOF > "$DEB_DIR/usr/share/applications/$APP_NAME.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=$APP_TITLE
-Comment=Destruição segura de arquivos
+Comment=Destruicao segura de arquivos
 Exec=$APP_NAME
 Icon=$APP_NAME
 Terminal=false
-Categories=Utility;
+Categories=Utility;System;
 StartupNotify=true
 EOF
-
-
 chmod 644 "$DEB_DIR/usr/share/applications/$APP_NAME.desktop"
 
+# 9. Gerar o arquivo .deb final
+echo "🏗️  Gerando instalador final..."
+dpkg-deb --build "$DEB_DIR" "${APP_NAME}_${VERSION}_amd64.deb"
 
-ok "Estrutura DEB criada."
-############################################
-# Gerar pacote DEB
-############################################
-
-echo "Gerando arquivo .deb..."
-
-dpkg-deb --build \
-"$DEB_DIR" \
-"$OUTPUT"
-
-
-if [ -f "$OUTPUT" ]; then
-
-    echo
-    echo "======================================"
-    echo "  SUCESSO!"
-    echo "======================================"
-    echo
-    echo "Pacote criado:"
-    echo "$OUTPUT"
-    echo
-    echo "Instalar:"
-    echo "sudo apt install ./$OUTPUT"
-    echo
-
-else
-
-    echo "Erro: pacote não foi criado."
-    exit 1
-
-fi
+echo "======================================"
+echo "  🎉 SUCESSO!"
+echo "======================================"
+echo "Pacote criado: ${APP_NAME}_${VERSION}_amd64.deb"
+echo "Para instalar: sudo apt install ./${APP_NAME}_${VERSION}_amd64.deb"
+echo "======================================"
