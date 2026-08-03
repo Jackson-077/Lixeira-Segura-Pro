@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # ==========================================================
 # Lixeira Segura Pro
-# Versão: 1.2 (Edição Jackson Q. - Versão Final Estável)
+# Versão: 1.2 (Edição Jackson Q. - Organização Profissional)
 #
 # Autor: Jackson Q.
 # Descrição: Utilitário profissional para destruição de dados.
-# Correções: Controle de janelas únicas (Singleton Windows),
-#            detecção profunda de hardware e limpeza total.
+# Correções: Migração de configurações para diretórios ocultos (~/.config/lixeira-segura)
+#            e manutenção da pasta de descarte visível.
 # ==========================================================
 
 import os
@@ -26,10 +26,20 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 # --- Variáveis de Ambiente ---
-DIR_BASE = os.path.join(os.path.expanduser("~"), "Lixeira_Segura")
-DIR_APAGAR = os.path.join(DIR_BASE, "apagar_aqui")
-DIR_LOGS = os.path.join(DIR_BASE, "logs")
-ARQUIVO_CONFIG = os.path.join(DIR_BASE, "config.json")
+# Pasta visível para o usuário interagir
+DIR_DESCARTE_BASE = os.path.join(os.path.expanduser("~"), "Lixeira_Segura")
+DIR_APAGAR = os.path.join(DIR_DESCARTE_BASE, "apagar_aqui")
+
+# Pasta oculta para configurações e logs (Padrão Linux)
+# Configurações seguindo o padrão XDG do Linux
+CONFIG_HOME = os.environ.get(
+    "XDG_CONFIG_HOME",
+    os.path.join(os.path.expanduser("~"), ".config")
+)
+
+DIR_CONFIG_OCULTA = os.path.join(CONFIG_HOME, "lixeira-segura")
+DIR_LOGS = os.path.join(DIR_CONFIG_OCULTA, "logs")
+ARQUIVO_CONFIG = os.path.join(DIR_CONFIG_OCULTA, "config.json")
 ARQUIVO_LOG = os.path.join(DIR_LOGS, "exclusoes.log")
 
 class LixeiraSeguraApp:
@@ -39,9 +49,10 @@ class LixeiraSeguraApp:
         self.window.geometry("800x650")
         self.window.resizable(True, True)
 
-        # Garantir estrutura de pastas
+        # Garantir estrutura de pastas (Visíveis e Ocultas)
         os.makedirs(DIR_APAGAR, exist_ok=True)
         os.makedirs(DIR_LOGS, exist_ok=True)
+        
         if not os.path.exists(ARQUIVO_LOG):
             with open(ARQUIVO_LOG, "w") as f: f.write("")
 
@@ -79,7 +90,6 @@ class LixeiraSeguraApp:
     def detectar_disco(self):
         """Detecta se o disco é HDD ou SSD para aplicar o melhor método de destruição."""
         try:
-            # Tenta identificar via lsblk
             output = subprocess.check_output("lsblk -o ROTA,MOUNTPOINT", shell=True).decode()
             if "0 /" in output or "0 /home" in output:
                 return "HDD (Disco Rígido)"
@@ -88,7 +98,7 @@ class LixeiraSeguraApp:
             return "Disco Genérico"
 
     def get_all_entries(self):
-        """Lista todos os arquivos, pastas e links simbólicos recursivamente."""
+        """Lista todos os arquivos, pastas e links simbólicos recursivamente na pasta de descarte."""
         entries = []
         try:
             for root, dirs, files in os.walk(DIR_APAGAR):
@@ -231,7 +241,7 @@ class LixeiraSeguraApp:
 
             self.window.after(0, lambda v=(i + 1) / total: self.progress_bar.set(v))
 
-        # Limpar pastas
+        # Limpar pastas vazias na pasta de descarte
         for root, dirs, files in os.walk(DIR_APAGAR, topdown=False):
             for d in dirs:
                 try: os.rmdir(os.path.join(root, d))
@@ -263,9 +273,11 @@ class LixeiraSeguraApp:
         
         def limpar():
             if messagebox.askyesno("Limpar Logs", "Destruir arquivo de logs permanentemente?", parent=self.win_history):
-                subprocess.run(["shred", "-f", "-u", "-z", "-n", "3", ARQUIVO_LOG])
-                with open(ARQUIVO_LOG, "w") as f: f.write("")
-                txt.delete("0.0", "end")
+                try:
+                    subprocess.run(["shred", "-f", "-u", "-z", "-n", "3", ARQUIVO_LOG], check=True)
+                    with open(ARQUIVO_LOG, "w") as f: f.write("")
+                    txt.delete("0.0", "end")
+                except: pass
         
         ctk.CTkButton(self.win_history, text="🔥 Destruir Histórico", fg_color="#E74C3C", command=limpar).pack(pady=5)
 
